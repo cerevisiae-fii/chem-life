@@ -1,0 +1,1365 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>粒子ケミカルエンジン 3D</title>
+<style>
+:root{
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  color-scheme:dark;
+  --bg:#0b0b12;
+  --fg:#e8e8f2;
+  --panel:#151520;
+  --line:#2b2b3d;
+  --accent:#6ea8ff;
+}
+html,body{height:100%}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--fg);
+  font:13px/1.4 system-ui,-apple-system,"Hiragino Sans",sans-serif;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+  user-select:none;
+  -webkit-user-select:none;
+}
+#wrap{
+  margin:0 auto;
+  flex:none;
+  position:relative;
+  background:#05050a;
+}
+#cv{
+  display:block;
+  background:radial-gradient(circle at 50% 45%, #111322 0%, #050509 100%);
+  touch-action:none;
+}
+#st{
+  position:absolute;
+  left:8px;
+  top:6px;
+  font-size:11px;
+  opacity:.85;
+  font-variant-numeric:tabular-nums;
+  pointer-events:none;
+  text-shadow:0 1px 3px #000;
+  line-height:1.35;
+}
+#camHint{
+  position:absolute;
+  right:8px;
+  bottom:6px;
+  font-size:10px;
+  opacity:.65;
+  pointer-events:none;
+  text-shadow:0 1px 2px #000;
+}
+#panel{
+  flex:1;
+  min-height:0;
+  background:var(--panel);
+  border-top:1px solid var(--line);
+  padding:8px;
+  overflow-y:auto;
+  display:flex;
+  flex-direction:column;
+  gap:7px;
+}
+button,select{
+  background:#222236;
+  color:var(--fg);
+  border:1px solid var(--line);
+  border-radius:8px;
+  padding:6px 9px;
+  font-size:12.5px;
+  cursor:pointer;
+}
+button:active{background:#343454}
+.chips{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.chips button{padding:5px 8px}
+.chips button.on,button.on{
+  border-color:var(--accent);
+  color:var(--accent);
+  background:#1d2842;
+}
+.el{
+  min-width:33px;
+  font-weight:700;
+  text-shadow:0 0 2px rgba(0,0,0,.6);
+}
+.row{
+  display:grid;
+  grid-template-columns:8.2em 1fr 3.6em;
+  align-items:center;
+  gap:6px;
+}
+.row span:last-child{
+  text-align:right;
+  font-variant-numeric:tabular-nums;
+}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.h{font-size:11px;opacity:.68;line-height:1.45}
+.sec-lbl{font-size:11px;opacity:.65;margin-right:2px}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="cv"></canvas>
+  <div id="st"></div>
+  <div id="camHint">3D視点: 右ドラッグ / カメラモードで回転・ホイール拡大</div>
+</div>
+
+<div id="panel">
+  <!-- 反応シナリオプリセット -->
+  <div class="chips">
+    <span class="sec-lbl">反応実験:</span>
+    <select id="preset">
+      <option value="water">1. 液体の水 (H2O 水素結合ネットワーク)</option>
+      <option value="benzene">2. ベンゼン環と酸素 (C6H6 + O2 二重結合の3D安定)</option>
+      <option value="hcl">3. 塩酸の電離 (HCl + H2O → H3O⁺ + Cl⁻)</option>
+      <option value="precip">4. 沈殿生成 (AgNO3 + NaCl → AgCl↓)</option>
+      <option value="halogen">5. ハロゲンによる酸化還元 (Br2 / Cl2 + Zn / Na)</option>
+      <option value="acid_metal">6. 硫酸・クロム酸による金属酸化 (H2SO4/H2CrO4 + Zn/Cu)</option>
+      <option value="alcohol_na">7. アルコールとNaの水素発生 (C2H5OH + Na → H2↑)</option>
+    </select>
+    <button id="loadPreset">読込</button>
+  </div>
+
+  <!-- 元素パレット -->
+  <div class="chips" id="els"></div>
+
+  <!-- 分子・イオンパレット -->
+  <div class="chips" id="mols"></div>
+
+  <!-- 配置・操作モード -->
+  <div class="chips">
+    <select id="chg" title="単原子追加時の初期電荷">
+      <option value="0">電荷 0</option>
+      <option value="1">+1</option>
+      <option value="2">+2</option>
+      <option value="-1">−1</option>
+      <option value="-2">−2</option>
+    </select>
+    <select id="cnt" title="追加個数">
+      <option value="1">1</option>
+      <option value="4" selected>4</option>
+      <option value="12">12</option>
+    </select>
+    <button id="add">＋ 追加</button>
+    <button id="clear">全消去</button>
+    <button id="play">⏸</button>
+    <button id="tgE" class="on">電子 表示</button>
+    <button id="tgB" class="on">結合線 表示</button>
+  </div>
+
+  <!-- ポインタ操作モード切替 -->
+  <div class="chips">
+    <span class="sec-lbl">タッチ/左ドラッグ:</span>
+    <button id="mOrbit" class="on">🎥 3Dカメラ回転</button>
+    <button id="mPut">📍 クリック追加</button>
+    <button id="mTool">🧲 干渉(スワイプ/長押し)</button>
+  </div>
+
+  <div id="sl"></div>
+  <div class="h">
+    【3D物理モデル】ハードコードされた反応式は一切なく、①クーロン力 ②パウリ排他斥力 ③電気陰性度(χ^p)で重み付けされたオクテット則 のみから3次元空間で結合・電離・沈殿・酸化還元が創発します。二重結合(O=O, C=C)では4個の共有電子が核間軸の周りに立体的に2対の電子雲を形成します。
+  </div>
+</div>
+
+<script>
+/* ============================================================================
+   1. 元素データ & 物理定数（3D現実化学チューニング済み）
+   ============================================================================
+   q: 殻外コア電荷（価電子数）
+   r: 共有結合/イオン基準半径 (Å)
+   chi: ポーリング電気陰性度
+   d: オクテット目標電子数（0 = 電子を手放して陽イオンになりやすい典型/遷移金属）
+   m: 原子量
+*/
+const EL = {
+  H:  {q:1, r:0.34, chi:2.20, d:2, m:1,   c:'#ffffff'},
+  C:  {q:4, r:0.74, chi:2.55, d:8, m:12,  c:'#888c94'},
+  N:  {q:5, r:0.69, chi:3.04, d:8, m:14,  c:'#3b66ff'},
+  O:  {q:6, r:0.63, chi:3.44, d:8, m:16,  c:'#ff2a2a'},
+  Na: {q:1, r:1.02, chi:0.93, d:0, m:23,  c:'#ab5cf2'},
+  Mg: {q:2, r:0.88, chi:1.31, d:0, m:24,  c:'#8aff00'},
+  P:  {q:5, r:1.04, chi:2.19, d:8, m:31,  c:'#ff8000'},
+  S:  {q:6, r:0.98, chi:2.58, d:8, m:32,  c:'#ffe629'},
+  Cl: {q:7, r:0.96, chi:3.16, d:8, m:35,  c:'#1ff01f'},
+  K:  {q:1, r:1.30, chi:0.82, d:0, m:39,  c:'#8f40d4'},
+  Ca: {q:2, r:1.06, chi:1.00, d:0, m:40,  c:'#3dff00'},
+  Cr: {q:6, r:0.92, chi:1.66, d:0, m:52,  c:'#6898d8'},
+  Cu: {q:2, r:0.88, chi:1.90, d:0, m:64,  c:'#d48238'},
+  Zn: {q:2, r:0.88, chi:1.65, d:0, m:65,  c:'#7d86b8'},
+  Br: {q:7, r:1.12, chi:2.96, d:8, m:80,  c:'#b83232'},
+  Ag: {q:1, r:1.12, chi:1.93, d:0, m:108, c:'#cfd6e0'},
+  Pb: {q:2, r:1.25, chi:2.33, d:0, m:207, c:'#5e626e'},
+  Ar: {q:8, r:1.00, chi:0.00, d:8, m:40,  c:'#80d1e3'}
+};
+const NAMES = Object.keys(EL);
+
+const KB = 0.00065;
+const SZ = 1.12; // 空間スケール倍率
+
+/* 3D空間での二重結合安定・電離・酸化還元を再現する物理パラメータ
+   - K: クーロン定数（電子間反発と核-電子引力のバランス）
+   - A: オクテット引力（共有電子対の形成エネルギー）
+   - B: オクテット超過排他力（パウリの排他原理による過剰電子の押し出し）
+   - Er: 短距離コア反発係数（3Dでの核間距離と二重結合電子環の安定化）
+   - cp: 電気陰性度指数 χ^cp（1.65でHClの極性電離や酸化剤の電子奪取が明瞭化）
+   - G: 溶媒和・イオン格子凝集補正（AgCl等の難溶性塩とNaClの水和分散の差）
+*/
+const P = {
+  K: 10.5,
+  T: 280 * KB,
+  P0: 0.02,
+  Rc: 7.5,
+  dt: 0.028,
+  A: 56,
+  B: 115,
+  Er: 6.5,
+  mu: 0.022,
+  gam: 2.2,
+  L: 24,
+  baro: 0,
+  mf: 3.0,
+  G: 12.0,
+  cp: 1.65
+};
+
+const MAX = 4500;
+let N = 0;
+
+// 3D粒子配列
+const X = new Float32Array(MAX), Y = new Float32Array(MAX), Z = new Float32Array(MAX);
+const VX = new Float32Array(MAX), VY = new Float32Array(MAX), VZ = new Float32Array(MAX);
+const FX = new Float32Array(MAX), FY = new Float32Array(MAX), FZ = new Float32Array(MAX);
+const AX = new Float32Array(MAX), AY = new Float32Array(MAX), AZ = new Float32Array(MAX);
+
+const ND = new Float32Array(MAX);   // 電子から最近接原子核までの距離2乗
+const NO = new Int32Array(MAX);     // 電子の最近接原子インデックス
+const EQ = new Float32Array(MAX);   // 原子の実効電荷（周囲の電子数から動的計算）
+const NC = new Float32Array(MAX);   // 原子の近傍電子数
+const TY = new Int8Array(MAX);      // -1: 電子, >=0: 元素インデックス
+const QQ = new Float32Array(MAX);   // 裸のコア電荷
+const RR = new Float32Array(MAX);   // 粒子半径
+const MS = new Float32Array(MAX);   // 質量
+const CH = new Float32Array(MAX);   // 電気陰性度
+const DD = new Float32Array(MAX);   // オクテット目標数
+const RS = new Float32Array(MAX);   // 内殻排他半径
+
+// 3D空間ハッシュグリッド (最大 32^3 = 32768 セル)
+const GRID_MAX = 32768;
+const head = new Int32Array(GRID_MAX);
+const nxt = new Int32Array(MAX);
+
+let imp = 0, tick = 0, W = 0, Pm = 0, Tm = 0, nc = 4, cs = 6;
+
+function gauss() {
+  return Math.sqrt(-2 * Math.log(Math.random() + 1e-12)) * Math.cos(6.283185 * Math.random());
+}
+
+function addP(t, x, y, z) {
+  if (N >= MAX) return -1;
+  const i = N++;
+  TY[i] = t;
+  X[i] = x; Y[i] = y; Z[i] = z;
+  VX[i] = VY[i] = VZ[i] = 0;
+  if (t < 0) {
+    QQ[i] = -1;
+    RR[i] = 0.14;
+    MS[i] = 1;
+  } else {
+    const e = EL[NAMES[t]];
+    QQ[i] = e.q;
+    RR[i] = e.r * SZ;
+    MS[i] = P.mf * e.m;
+    CH[i] = e.chi;
+    DD[i] = e.d;
+    RS[i] = (1.18 * e.r + 0.34) * SZ;
+    EQ[i] = 0;
+  }
+  return i;
+}
+
+/* ランダム3D回転行列の生成（分子を任意の3D姿勢で配置するため） */
+function randRot3D() {
+  const u1 = Math.random(), u2 = Math.random() * 6.283185, u3 = Math.random() * 6.283185;
+  const s1 = Math.sqrt(1 - u1), s2 = Math.sqrt(u1);
+  const qx = s1 * Math.sin(u2), qy = s1 * Math.cos(u2), qz = s2 * Math.sin(u3), qw = s2 * Math.cos(u3);
+  return [
+    1 - 2*(qy*qy + qz*qz), 2*(qx*qy - qz*qw),     2*(qx*qz + qy*qw),
+    2*(qx*qy + qz*qw),     1 - 2*(qx*qx + qz*qz), 2*(qy*qz - qx*qw),
+    2*(qx*qz - qy*qw),     2*(qy*qz + qx*qw),     1 - 2*(qx*qx + qy*qy)
+  ];
+}
+
+/* 3D分子・イオン配置関数
+   二重結合・三重結合の共有電子対は、結合軸に垂直な面内で立体的に分散配置する */
+function place3D(sp, cx, cy, cz, rotMat) {
+  const R = rotMat || randRot3D();
+  const idx = [];
+  const nb = sp.a.map(() => 0);
+  const bondMap = new Map();
+
+  for (const [i, j] of sp.b) {
+    nb[i]++; nb[j]++;
+    const key = i < j ? `${i}_${j}` : `${j}_${i}`;
+    bondMap.set(key, (bondMap.get(key) || 0) + 1);
+  }
+
+  sp.a.forEach((e, k) => {
+    const [px0, py0, pz0 = 0] = sp.p[k];
+    const px = px0 * SZ, py = py0 * SZ, pz = pz0 * SZ;
+    const x = cx + R[0]*px + R[1]*py + R[2]*pz;
+    const y = cy + R[3]*px + R[4]*py + R[5]*pz;
+    const z = cz + R[6]*px + R[7]*py + R[8]*pz;
+    idx.push(addP(NAMES.indexOf(e), x, y, z));
+  });
+
+  // 共有結合電子の3D配置（単結合=2個, 二重結合=4個を軸周囲に立体配置）
+  for (const [key, order] of bondMap.entries()) {
+    const [i, j] = key.split('_').map(Number);
+    const ai = idx[i], aj = idx[j];
+    if (ai < 0 || aj < 0) continue;
+    const mx = (X[ai] + X[aj]) * 0.5;
+    const my = (Y[ai] + Y[aj]) * 0.5;
+    const mz = (Z[ai] + Z[aj]) * 0.5;
+    let ux = X[aj] - X[ai], uy = Y[aj] - Y[ai], uz = Z[aj] - Z[ai];
+    const ul = Math.hypot(ux, uy, uz) || 1;
+    ux /= ul; uy /= ul; uz /= ul;
+
+    // 結合軸に直交する2つの基底ベクトル v1, v2 を構成
+    let vx = 0, vy = 1, vz = 0;
+    if (Math.abs(uy) > 0.85) { vx = 1; vy = 0; vz = 0; }
+    let v1x = uy*vz - uz*vy, v1y = uz*vx - ux*vz, v1z = ux*vy - uy*vx;
+    const v1l = Math.hypot(v1x, v1y, v1z) || 1;
+    v1x /= v1l; v1y /= v1l; v1z /= v1l;
+    const v2x = uy*v1z - uz*v1y, v2y = uz*v1x - ux*v1z, v2z = ux*v1y - uy*v1x;
+
+    const totalE = order * 2;
+    const rad = (order === 1 ? 0.16 : 0.24) * SZ;
+    const ph0 = Math.random() * 6.283185;
+    for (let m = 0; m < totalE; m++) {
+      const ang = ph0 + (m * 6.283185) / totalE;
+      const c = Math.cos(ang), s = Math.sin(ang);
+      addP(-1,
+        mx + (v1x*c + v2x*s) * rad,
+        my + (v1y*c + v2y*s) * rad,
+        mz + (v1z*c + v2z*s) * rad
+      );
+    }
+  }
+
+  // 非共有電子対（孤立電子対）を原子周囲の3D球面上に配置
+  sp.a.forEach((e, k) => {
+    const ai = idx[k];
+    if (ai < 0) return;
+    const n = Math.max(0, EL[e].q - (sp.ch ? sp.ch[k] : 0) - nb[k]);
+    const ph = Math.random() * 6.283185;
+    for (let m = 0; m < n; m++) {
+      // フィボナッチ球面分布で3Dに均等配置
+      const y0 = 1 - (2 * (m + 0.5)) / Math.max(1, n);
+      const r0 = Math.sqrt(Math.max(0, 1 - y0 * y0));
+      const th = ph + m * 2.39996;
+      const rad = 0.54 * SZ;
+      addP(-1,
+        X[ai] + Math.cos(th) * r0 * rad,
+        Y[ai] + y0 * rad,
+        Z[ai] + Math.sin(th) * r0 * rad
+      );
+    }
+  });
+}
+
+/* ============================================================================
+   2. 3D分子・イオンデータ定義（ベンゼン環、アルコール、酸、塩、単体金属含む）
+   ============================================================================ */
+const MOL = {
+  H2O: {
+    a:['O','H','H'],
+    p:[[0,0,0],[0.96,0,0],[-0.24,0.93,0]],
+    b:[[0,1],[0,2]]
+  },
+  O2: {
+    a:['O','O'],
+    p:[[-0.60,0,0],[0.60,0,0]],
+    b:[[0,1],[0,1]] // 二重結合
+  },
+  H2: {
+    a:['H','H'],
+    p:[[-0.37,0,0],[0.37,0,0]],
+    b:[[0,1]]
+  },
+  C6H6: { // ベンゼン環（平面正六角形 + 共鳴二重結合）
+    a:['C','C','C','C','C','C','H','H','H','H','H','H'],
+    p:[
+      [ 1.39, 0.00, 0], [ 0.70, 1.20, 0], [-0.70, 1.20, 0],
+      [-1.39, 0.00, 0], [-0.70,-1.20, 0], [ 0.70,-1.20, 0],
+      [ 2.47, 0.00, 0], [ 1.24, 2.14, 0], [-1.24, 2.14, 0],
+      [-2.47, 0.00, 0], [-1.24,-2.14, 0], [ 1.24,-2.14, 0]
+    ],
+    b:[
+      [0,1],[0,1],[1,2],[2,3],[2,3],[3,4],[4,5],[4,5],[5,0],
+      [0,6],[1,7],[2,8],[3,9],[4,10],[5,11]
+    ]
+  },
+  C2H5OH: { // エタノール（3D四面体構造）
+    a:['C','C','O','H','H','H','H','H','H'],
+    p:[
+      [-0.75, 0.00, 0.00], [0.75, 0.00, 0.00], [1.40, 1.22, 0.00],
+      [-1.15, 0.98, 0.35], [-1.15,-0.25,-0.98], [-1.15,-0.73, 0.63],
+      [ 1.12,-0.55, 0.88], [ 1.12,-0.55,-0.88], [ 2.34, 1.12, 0.00]
+    ],
+    b:[[0,1],[1,2],[0,3],[0,4],[0,5],[1,6],[1,7],[2,8]]
+  },
+  HCl: {
+    a:['H','Cl'],
+    p:[[-0.63,0,0],[0.63,0,0]],
+    b:[[0,1]]
+  },
+  Cl2: {
+    a:['Cl','Cl'],
+    p:[[-0.98,0,0],[0.98,0,0]],
+    b:[[0,1]]
+  },
+  Br2: {
+    a:['Br','Br'],
+    p:[[-1.12,0,0],[1.12,0,0]],
+    b:[[0,1]]
+  },
+  H2SO4: { // 硫酸（四面体硫黄 + 2つのOH基と2つのS=O）
+    a:['S','O','O','O','O','H','H'],
+    p:[
+      [0,0,0],
+      [1.25, 0.85, 0], [-1.25, 0.85, 0],
+      [0, -0.95, 1.25], [0, -0.95, -1.25],
+      [0, -1.85, 1.55], [0, -1.85, -1.55]
+    ],
+    b:[[0,1],[0,1],[0,2],[0,2],[0,3],[0,4],[3,5],[4,6]]
+  },
+  H2CrO4: { // クロム酸（強力な酸化剤）
+    a:['Cr','O','O','O','O','H','H'],
+    p:[
+      [0,0,0],
+      [1.30, 0.85, 0], [-1.30, 0.85, 0],
+      [0, -0.95, 1.30], [0, -0.95, -1.30],
+      [0, -1.85, 1.60], [0, -1.85, -1.60]
+    ],
+    b:[[0,1],[0,1],[0,2],[0,2],[0,3],[0,4],[3,5],[4,6]]
+  },
+  AgNO3: {
+    a:['Ag','N','O','O','O'],
+    p:[[-1.6,0,0],[1.2,0,0],[2.42,0,0],[0.6,1.05,0],[0.6,-1.05,0]],
+    b:[[1,2],[1,2],[1,3],[1,4]],
+    ch:[1,1,0,-1,-1]
+  },
+  NaCl: {
+    a:['Na','Cl'],
+    p:[[-1.2,0,0],[1.2,0,0]],
+    b:[],
+    ch:[1,-1]
+  },
+  NaOH: {
+    a:['Na','O','H'],
+    p:[[-1.1,0,0],[0.9,0,0],[1.86,0,0]],
+    b:[[1,2]],
+    ch:[1,-1,0]
+  },
+  CO2: {
+    a:['O','C','O'],
+    p:[[-1.16,0,0],[0,0,0],[1.16,0,0]],
+    b:[[0,1],[0,1],[1,2],[1,2]]
+  },
+  NH3: {
+    a:['N','H','H','H'],
+    p:[[0,0,0.2],[0.94,0,-0.15],[-0.47,0.81,-0.15],[-0.47,-0.81,-0.15]],
+    b:[[0,1],[0,2],[0,3]]
+  },
+  CH4: {
+    a:['C','H','H','H','H'],
+    p:[[0,0,0],[0.63,0.63,0.63],[-0.63,-0.63,0.63],[-0.63,0.63,-0.63],[0.63,-0.63,-0.63]],
+    b:[[0,1],[0,2],[0,3],[0,4]]
+  },
+  'H3O+': {
+    a:['O','H','H','H'],
+    p:[[0,0,0.15],[0.95,0,-0.1],[-0.48,0.82,-0.1],[-0.48,-0.82,-0.1]],
+    b:[[0,1],[0,2],[0,3]],
+    ch:[1,0,0,0]
+  },
+  'OH−': {
+    a:['O','H'],
+    p:[[0,0,0],[0.96,0,0]],
+    b:[[0,1]],
+    ch:[-1,0]
+  }
+};
+
+/* 3D空間内で既存原子と重なりにくい位置を探して配置 */
+function addSpec(sp, n, region) {
+  const pad = 2.0;
+  const x0 = region ? region[0] : pad, x1 = region ? region[1] : P.L - pad;
+  const y0 = region ? region[2] : pad, y1 = region ? region[3] : P.L - pad;
+  const z0 = region ? region[4] : pad, z1 = region ? region[5] : P.L - pad;
+
+  for (let k = 0; k < n; k++) {
+    let bx = (x0 + x1) * 0.5, by = (y0 + y1) * 0.5, bz = (z0 + z1) * 0.5, bd = -1;
+    for (let t = 0; t < 70; t++) {
+      const x = x0 + Math.random() * Math.max(0.5, x1 - x0);
+      const y = y0 + Math.random() * Math.max(0.5, y1 - y0);
+      const z = z0 + Math.random() * Math.max(0.5, z1 - z0);
+      let m = 1e9;
+      for (let i = 0; i < N; i++) {
+        if (TY[i] >= 0) {
+          const d = (X[i]-x)**2 + (Y[i]-y)**2 + (Z[i]-z)**2;
+          if (d < m) m = d;
+        }
+      }
+      if (m > bd) { bd = m; bx = x; by = y; bz = z; }
+    }
+    if (N + 60 < MAX) place3D(sp, bx, by, bz);
+  }
+}
+
+/* ============================================================================
+   3. 3D空間ハッシュ & 物理シミュレーションコア
+   ============================================================================ */
+function grid() {
+  cs = P.Rc;
+  nc = Math.max(1, Math.min(30, Math.floor(P.L / cs)));
+  cs = P.L / nc;
+  head.fill(-1, 0, nc * nc * nc);
+  for (let i = 0; i < N; i++) {
+    const gx = Math.min(nc - 1, Math.max(0, (X[i] / cs) | 0));
+    const gy = Math.min(nc - 1, Math.max(0, (Y[i] / cs) | 0));
+    const gz = Math.min(nc - 1, Math.max(0, (Z[i] / cs) | 0));
+    const c = gx + nc * (gy + nc * gz);
+    nxt[i] = head[c];
+    head[c] = i;
+  }
+}
+
+function pairs() {
+  const Rc2 = P.Rc * P.Rc, K = P.K, invRc = 1 / P.Rc;
+  for (let i = 0; i < N; i++) {
+    const ti = TY[i];
+    const cx = Math.min(nc - 1, Math.max(0, (X[i] / cs) | 0));
+    const cy = Math.min(nc - 1, Math.max(0, (Y[i] / cs) | 0));
+    const cz = Math.min(nc - 1, Math.max(0, (Z[i] / cs) | 0));
+
+    const gx0 = Math.max(0, cx - 1), gx1 = Math.min(nc - 1, cx + 1);
+    const gy0 = Math.max(0, cy - 1), gy1 = Math.min(nc - 1, cy + 1);
+    const gz0 = Math.max(0, cz - 1), gz1 = Math.min(nc - 1, cz + 1);
+
+    for (let gx = gx0; gx <= gx1; gx++) {
+      for (let gy = gy0; gy <= gy1; gy++) {
+        for (let gz = gz0; gz <= gz1; gz++) {
+          for (let j = head[gx + nc * (gy + nc * gz)]; j >= 0; j = nxt[j]) {
+            if (j <= i) continue;
+            const dx = X[j] - X[i], dy = Y[j] - Y[i], dz = Z[j] - Z[i];
+            const r2 = dx*dx + dy*dy + dz*dz;
+            if (r2 > Rc2) continue;
+
+            const tj = TY[j];
+            // 電子と原子核の最近接トラッキング（実効電荷 EQ の算出用）
+            if ((ti < 0) !== (tj < 0)) {
+              const e = ti < 0 ? i : j;
+              if (r2 < ND[e]) {
+                ND[e] = r2;
+                NO[e] = ti < 0 ? j : i;
+              }
+            }
+
+            const r = Math.sqrt(r2) + 1e-6;
+            const tp = 1 - r * invRc;
+            // 1) 遮蔽クーロン相互作用
+            let f = K * QQ[i] * QQ[j] / (r2 + 0.045) * tp * tp;
+
+            // 2) 短距離パウリ斥力（コア反発）
+            const s = (ti < 0 && tj < 0) ? 0.28
+                    : (ti < 0 || tj < 0) ? 0.54 * RR[ti < 0 ? j : i] + 0.08
+                    : (RR[i] + RR[j]);
+            if (r < 1.6 * s) {
+              f += 10 * P.Er * Math.pow(s / r, 10) / r;
+            }
+
+            // 3) イオン格子凝集 vs 水和分散の有効ポテンシャル（Ag+とCl-等のイオン半径整合性）
+            if (ti >= 0 && tj >= 0 && P.G > 0) {
+              const w = -EQ[i] * EQ[j];
+              if (w > 0.25) {
+                const lr = Math.log(RR[i] / RR[j]);
+                const mt = Math.exp(-lr * lr / 0.035); // 半径が近いイオン対(Ag+とCl-等)は格子安定化
+                const r0 = 1.05 * (RR[i] + RR[j]);
+                const lim = 2.3 * r0;
+                if (mt > 0.02 && r < lim) {
+                  const u = 1 - r / lim;
+                  f -= P.G * Math.min(1.5, w) * mt * u * u;
+                }
+              }
+            }
+
+            const cl = (ti >= 0 && tj >= 0) ? 2600 : 320;
+            f = Math.max(-cl, Math.min(cl, f));
+            const invR = f / r;
+            const fx = invR * dx, fy = invR * dy, fz = invR * dz;
+            FX[i] -= fx; FY[i] -= fy; FZ[i] -= fz;
+            FX[j] += fx; FY[j] += fy; FZ[j] += fz;
+            W += r * f;
+          }
+        }
+      }
+    }
+  }
+}
+
+/* 3D電気陰性度重み付きオクテット則 */
+const SI = new Int32Array(MAX * 8);
+const SN = new Uint8Array(MAX);
+const SW = new Float32Array(MAX);
+const SC = new Uint8Array(MAX);
+const CP = new Float32Array(MAX);
+const selDist = new Float32Array(8);
+const selIdx = new Int32Array(8);
+
+function octet() {
+  const A = P.A;
+  const Rcut = 2.85 * SZ;
+  const R2 = Rcut * Rcut;
+  const Rfull = 1.45 * SZ;
+  const invSpan = 1 / (Rcut - Rfull);
+  const cp = P.cp;
+
+  for (let i = 0; i < N; i++) {
+    SW[i] = 0; SC[i] = 0; SN[i] = 0;
+    if (TY[i] >= 0) CP[i] = Math.pow(Math.max(0.05, CH[i]), cp);
+  }
+
+  // 1) 各非金属原子が周囲の電子を最大 d 個（オクテット数）まで共有候補として選択
+  for (let i = 0; i < N; i++) {
+    if (TY[i] < 0) continue;
+    const d = DD[i];
+    if (d <= 0) continue; // 金属原子(d=0)は共有電子殻を持たず電子を放出する
+    let n = 0;
+    const cx = Math.min(nc - 1, Math.max(0, (X[i] / cs) | 0));
+    const cy = Math.min(nc - 1, Math.max(0, (Y[i] / cs) | 0));
+    const cz = Math.min(nc - 1, Math.max(0, (Z[i] / cs) | 0));
+
+    for (let gx = Math.max(0, cx - 1); gx <= Math.min(nc - 1, cx + 1); gx++) {
+      for (let gy = Math.max(0, cy - 1); gy <= Math.min(nc - 1, cy + 1); gy++) {
+        for (let gz = Math.max(0, cz - 1); gz <= Math.min(nc - 1, cz + 1); gz++) {
+          for (let j = head[gx + nc * (gy + nc * gz)]; j >= 0; j = nxt[j]) {
+            if (TY[j] >= 0) continue;
+            const dx = X[j] - X[i], dy = Y[j] - Y[i], dz = Z[j] - Z[i];
+            const r2 = dx*dx + dy*dy + dz*dz;
+            if (r2 > R2) continue;
+            if (n < d || r2 < selDist[n - 1]) {
+              let k = n < d ? n++ : n - 1;
+              while (k > 0 && selDist[k - 1] > r2) {
+                selDist[k] = selDist[k - 1];
+                selIdx[k] = selIdx[k - 1];
+                k--;
+              }
+              selDist[k] = r2;
+              selIdx[k] = j;
+            }
+          }
+        }
+      }
+    }
+    SN[i] = n;
+    for (let k = 0; k < n; k++) {
+      const e = selIdx[k];
+      SI[i * 8 + k] = e;
+      SW[e] += CP[i];
+      SC[e]++;
+    }
+  }
+
+  // 2) 選択された共有電子を電気陰性度比 (χ^cp) で引き寄せ、オクテット超過電子は排他斥力で押し出す
+  for (let i = 0; i < N; i++) {
+    if (TY[i] < 0) continue;
+    const n = SN[i];
+    for (let k = 0; k < n; k++) {
+      const j = SI[i * 8 + k];
+      const dx = X[i] - X[j], dy = Y[i] - Y[j], dz = Z[i] - Z[j];
+      const r = Math.sqrt(dx*dx + dy*dy + dz*dz) + 1e-6;
+      const t = r < Rfull ? 1.0 : Math.max(0, (Rcut - r) * invSpan);
+      const wg = (SC[j] * CP[i]) / (SW[j] + 1e-6);
+      const f = A * CH[i] * t * wg;
+      const invR = f / r;
+      FX[j] += invR * dx; FY[j] += invR * dy; FZ[j] += invR * dz;
+      FX[i] -= invR * dx; FY[i] -= invR * dy; FZ[i] -= invR * dz;
+      W -= r * f;
+    }
+
+    // オクテットを超えた電子へのパウリ排他斥力（価電子殻の飽和）
+    const Rs = RS[i], Rs2 = Rs * Rs;
+    const cx = Math.min(nc - 1, Math.max(0, (X[i] / cs) | 0));
+    const cy = Math.min(nc - 1, Math.max(0, (Y[i] / cs) | 0));
+    const cz = Math.min(nc - 1, Math.max(0, (Z[i] / cs) | 0));
+
+    for (let gx = Math.max(0, cx - 1); gx <= Math.min(nc - 1, cx + 1); gx++) {
+      for (let gy = Math.max(0, cy - 1); gy <= Math.min(nc - 1, cy + 1); gy++) {
+        for (let gz = Math.max(0, cz - 1); gz <= Math.min(nc - 1, cz + 1); gz++) {
+          for (let j = head[gx + nc * (gy + nc * gz)]; j >= 0; j = nxt[j]) {
+            if (TY[j] >= 0) continue;
+            const dx = X[j] - X[i], dy = Y[j] - Y[i], dz = Z[j] - Z[i];
+            const r2 = dx*dx + dy*dy + dz*dz;
+            if (r2 > Rs2 || r2 > 1.5 * ND[j]) continue;
+            let own = false;
+            for (let k = 0; k < n; k++) {
+              if (SI[i * 8 + k] === j) { own = true; break; }
+            }
+            if (own) continue;
+            const r = Math.sqrt(r2) + 1e-6;
+            const f = P.B * (0.5 + (Rs - r) / Rs);
+            const invR = f / r;
+            FX[j] += invR * dx; FY[j] += invR * dy; FZ[j] += invR * dz;
+            FX[i] -= invR * dx; FY[i] -= invR * dy; FZ[i] -= invR * dz;
+          }
+        }
+      }
+    }
+  }
+}
+
+/* 3Dユーザー干渉ツール（スワイプ・マグネット・バースト） */
+const tool = {
+  mode: 'swipe',
+  on: false,
+  x: 12, y: 12, z: 12,
+  vx: 0, vy: 0, vz: 0,
+  Rs: 4.5,
+  Rg: 10.0,
+  S: 280,
+  burst: 0,
+  filt: 'all'
+};
+
+function toolForce() {
+  if (!tool.on && !tool.burst) return;
+  const F = tool.S;
+  const R = tool.mode === 'swipe' ? tool.Rs : tool.Rg;
+  for (let i = 0; i < N; i++) {
+    const dx = X[i] - tool.x, dy = Y[i] - tool.y, dz = Z[i] - tool.z;
+    const r = Math.hypot(dx, dy, dz);
+    if (r > R || r < 1e-3) continue;
+    const g = 1 - r / R;
+    const flt = tool.filt;
+    if (tool.mode === 'magnet' && !(
+      flt === 'all' ||
+      (flt === 'e' && TY[i] < 0) ||
+      (flt === 'n' && TY[i] >= 0) ||
+      flt === NAMES[TY[i]]
+    )) continue;
+
+    let fx = 0, fy = 0, fz = 0;
+    if (tool.burst > 0) {
+      const s = F * 8 * g / r;
+      fx = dx * s; fy = dy * s; fz = dz * s;
+    } else if (tool.mode === 'swipe') {
+      fx = tool.vx * F * g; fy = tool.vy * F * g; fz = tool.vz * F * g;
+    } else if (tool.mode === 'magnet') {
+      const k = Math.min(1, r / 2.5);
+      const s = -F * 0.45 * g * k / r;
+      fx = dx * s; fy = dy * s; fz = dz * s;
+    }
+    AX[i] += fx; AY[i] += fy; AZ[i] += fz;
+  }
+  if (tool.burst > 0) tool.burst--;
+  tool.vx *= 0.6; tool.vy *= 0.6; tool.vz *= 0.6;
+}
+
+/* 1タイムステップの3D積分（ランジュバン動力学 + オーバーダンプ電子移動） */
+function step() {
+  const dt = P.dt, L = P.L;
+  grid();
+
+  for (let i = 0; i < N; i++) {
+    FX[i] = FY[i] = FZ[i] = 0;
+    AX[i] = AY[i] = AZ[i] = 0;
+    NC[i] = 0;
+    ND[i] = 1e9;
+  }
+  W = 0;
+
+  pairs();
+
+  for (let e = 0; e < N; e++) {
+    if (TY[e] < 0 && ND[e] < 2.35 * SZ * SZ) {
+      NC[NO[e]]++;
+    }
+  }
+  for (let i = 0; i < N; i++) {
+    if (TY[i] >= 0) {
+      EQ[i] += (QQ[i] - NC[i] - EQ[i]) * 0.08;
+    }
+  }
+
+  octet();
+  toolForce();
+
+  const ge = Math.exp(-P.gam * dt);
+  let ke = 0, nn = 0;
+  const tAct = tool.on || tool.burst > 0;
+  const vc = tAct ? 14 : 6.5;
+
+  for (let i = 0; i < N; i++) {
+    if (TY[i] < 0) {
+      const th = Math.sqrt(2 * P.mu * P.T * dt);
+      let dx = P.mu * FX[i] * dt + AX[i] * dt * 0.12 + th * gauss();
+      let dy = P.mu * FY[i] * dt + AY[i] * dt * 0.12 + th * gauss();
+      let dz = P.mu * FZ[i] * dt + AZ[i] * dt * 0.12 + th * gauss();
+      const d = Math.hypot(dx, dy, dz);
+      const dm = tAct ? 0.16 : 0.085;
+      if (d > dm) { const s = dm / d; dx *= s; dy *= s; dz *= s; }
+      X[i] += dx; Y[i] += dy; Z[i] += dz;
+    } else {
+      const m = MS[i];
+      const sg = Math.sqrt((P.T / m) * (1 - ge * ge));
+      VX[i] = (VX[i] + (FX[i] / m) * dt + AX[i] * dt) * ge + sg * gauss();
+      VY[i] = (VY[i] + (FY[i] / m) * dt + AY[i] * dt) * ge + sg * gauss();
+      VZ[i] = (VZ[i] + (FZ[i] / m) * dt + AZ[i] * dt) * ge + sg * gauss();
+
+      const v = Math.hypot(VX[i], VY[i], VZ[i]);
+      if (v > vc) { const s = vc / v; VX[i] *= s; VY[i] *= s; VZ[i] *= s; }
+
+      X[i] += VX[i] * dt;
+      Y[i] += VY[i] * dt;
+      Z[i] += VZ[i] * dt;
+      ke += 0.5 * m * (VX[i]*VX[i] + VY[i]*VY[i] + VZ[i]*VZ[i]);
+      nn++;
+    }
+
+    // 3D立方体境界 [0, L]^3 での弾性反射と壁面運動量フラックス計測
+    if (X[i] < 0) { X[i] = -X[i]; if (TY[i] >= 0) { imp += 2*MS[i]*Math.abs(VX[i]); VX[i] = Math.abs(VX[i]); } }
+    else if (X[i] > L) { X[i] = 2*L - X[i]; if (TY[i] >= 0) { imp += 2*MS[i]*Math.abs(VX[i]); VX[i] = -Math.abs(VX[i]); } }
+
+    if (Y[i] < 0) { Y[i] = -Y[i]; if (TY[i] >= 0) { imp += 2*MS[i]*Math.abs(VY[i]); VY[i] = Math.abs(VY[i]); } }
+    else if (Y[i] > L) { Y[i] = 2*L - Y[i]; if (TY[i] >= 0) { imp += 2*MS[i]*Math.abs(VY[i]); VY[i] = -Math.abs(VY[i]); } }
+
+    if (Z[i] < 0) { Z[i] = -Z[i]; if (TY[i] >= 0) { imp += 2*MS[i]*Math.abs(VZ[i]); VZ[i] = Math.abs(VZ[i]); } }
+    else if (Z[i] > L) { Z[i] = 2*L - Z[i]; if (TY[i] >= 0) { imp += 2*MS[i]*Math.abs(VZ[i]); VZ[i] = -Math.abs(VZ[i]); } }
+  }
+
+  Tm += ((nn ? (2 * ke) / (3 * nn) : 0) - Tm) * 0.025;
+  const Pi = imp / (dt * 6 * L * L);
+  imp = 0;
+  Pm += (Math.min(5, Pi) - Pm) * 0.004;
+
+  if (P.baro && ++tick > 300) {
+    const dl = Math.max(-0.0012, Math.min(0.0012, 0.4 * (Pm - P.P0) * dt));
+    const mu = 1 + dl;
+    if (L * mu > 12 && L * mu < 55) {
+      P.L = L * mu;
+      for (let i = 0; i < N; i++) { X[i] *= mu; Y[i] *= mu; Z[i] *= mu; }
+    }
+  }
+}
+
+/* ============================================================================
+   4. 反応実験プリセット群
+   ============================================================================ */
+function loadScenario(key) {
+  N = 0; tick = 0; Pm = 0;
+  P.baro = 0;
+  document.getElementById('baro').textContent = '定圧 OFF';
+
+  if (key === 'water') {
+    P.L = 22;
+    P.T = 280 * KB;
+    addSpec(MOL.H2O, 42);
+  } else if (key === 'benzene') {
+    P.L = 24;
+    P.T = 260 * KB;
+    // ベンゼン環を中央付近に2分子、周囲に酸素分子(二重結合)を配置
+    place3D(MOL.C6H6, P.L * 0.38, P.L * 0.5, P.L * 0.5);
+    place3D(MOL.C6H6, P.L * 0.65, P.L * 0.5, P.L * 0.5);
+    addSpec(MOL.O2, 8);
+  } else if (key === 'hcl') {
+    P.L = 22;
+    P.T = 300 * KB;
+    addSpec(MOL.H2O, 34);
+    addSpec(MOL.HCl, 5);
+  } else if (key === 'precip') {
+    P.L = 24;
+    P.T = 290 * KB;
+    addSpec(MOL.H2O, 32);
+    addSpec(MOL.AgNO3, 4);
+    addSpec(MOL.NaCl, 4);
+  } else if (key === 'halogen') {
+    P.L = 23;
+    P.T = 320 * KB;
+    // 金属クラスター(Zn, Na)とハロゲン単体(Br2, Cl2)の酸化還元
+    addSpec({a:['Zn'], p:[[0,0,0]], b:[], ch:[0]}, 5);
+    addSpec({a:['Na'], p:[[0,0,0]], b:[], ch:[0]}, 4);
+    addSpec(MOL.Br2, 4);
+    addSpec(MOL.Cl2, 3);
+  } else if (key === 'acid_metal') {
+    P.L = 24;
+    P.T = 320 * KB;
+    addSpec(MOL.H2O, 20);
+    addSpec(MOL.H2SO4, 3);
+    addSpec(MOL.H2CrO4, 2);
+    addSpec({a:['Zn'], p:[[0,0,0]], b:[], ch:[0]}, 4);
+    addSpec({a:['Cu'], p:[[0,0,0]], b:[], ch:[0]}, 3);
+  } else if (key === 'alcohol_na') {
+    P.L = 23;
+    P.T = 310 * KB;
+    addSpec(MOL.C2H5OH, 8);
+    addSpec({a:['Na'], p:[[0,0,0]], b:[], ch:[0]}, 6);
+  }
+
+  // スライダー表示の同期
+  const tSlider = document.getElementById('sl_T');
+  if (tSlider) {
+    tSlider.value = Math.round(P.T / KB);
+    tSlider.nextElementSibling.textContent = Math.round(P.T / KB);
+  }
+}
+
+/* ============================================================================
+   5. 3Dカメラ & レンダリングエンジン
+   ============================================================================ */
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const st = document.getElementById('st');
+
+const cam = {
+  yaw: 0.55,
+  pitch: 0.35,
+  zoom: 1.18,
+  fov: 38
+};
+
+let run = true, showE = true, showB = true, spf = 10;
+let selEl = 'O', selMol = null;
+let pointerMode = 'orbit'; // 'orbit' | 'put' | 'tool'
+
+function fit() {
+  const s = Math.floor(Math.min(innerWidth, innerHeight * 0.55));
+  cv.width = cv.height = Math.max(240, s);
+  cv.style.width = cv.style.height = cv.width + 'px';
+  document.getElementById('wrap').style.width = cv.width + 'px';
+}
+addEventListener('resize', fit);
+fit();
+
+/* 3Dワールド座標 → カメラ空間・スクリーン投影 */
+function getCamBasis() {
+  const cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw);
+  const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+  // カメラ右ベクトル rx, 前方視線ベクトル fz, 上ベクトル uy
+  return {
+    rx: [cy, 0, -sy],
+    uy: [-sy * sp, cp, -cy * sp],
+    fz: [sy * cp, sp, cy * cp]
+  };
+}
+
+function project3D(wx, wy, wz, basis, halfL, scalePx, halfW) {
+  const dx = wx - halfL, dy = wy - halfL, dz = wz - halfL;
+  const cx = dx * basis.rx[0] + dy * basis.rx[1] + dz * basis.rx[2];
+  const cy = dx * basis.uy[0] + dy * basis.uy[1] + dz * basis.uy[2];
+  const cz = dx * basis.fz[0] + dy * basis.fz[1] + dz * basis.fz[2];
+  const dist = cam.fov + cz;
+  if (dist < 2) return null;
+  const persp = (cam.fov / dist) * scalePx * cam.zoom;
+  return {
+    sx: halfW + cx * persp,
+    sy: halfW - cy * persp,
+    cz: cz,
+    persp: persp
+  };
+}
+
+/* スクリーン座標(px, py)から3Dボックス中央平面上のワールド座標への逆投影 */
+function unprojectCenterPlane(sx, sy) {
+  const w = cv.width, halfW = w * 0.5, halfL = P.L * 0.5;
+  const scalePx = (w * 0.62) / P.L;
+  const basis = getCamBasis();
+  const persp = scalePx * cam.zoom;
+  const cx = (sx - halfW) / persp;
+  const cy = -(sy - halfW) / persp;
+  return [
+    Math.min(P.L - 0.5, Math.max(0.5, halfL + cx * basis.rx[0] + cy * basis.uy[0])),
+    Math.min(P.L - 0.5, Math.max(0.5, halfL + cx * basis.rx[1] + cy * basis.uy[1])),
+    Math.min(P.L - 0.5, Math.max(0.5, halfL + cx * basis.rx[2] + cy * basis.uy[2]))
+  ];
+}
+
+// 描画用バッファ（奥行きソート用）
+const projX = new Float32Array(MAX);
+const projY = new Float32Array(MAX);
+const projZ = new Float32Array(MAX);
+const projS = new Float32Array(MAX);
+const drawOrder = new Int32Array(MAX);
+
+function draw() {
+  const w = cv.width, halfW = w * 0.5, L = P.L, halfL = L * 0.5;
+  const scalePx = (w * 0.62) / L;
+  const basis = getCamBasis();
+
+  ctx.clearRect(0, 0, w, w);
+
+  // 1) 3D立方体フレーム（ワイヤーフレーム）の描画
+  const corners = [
+    [0,0,0],[L,0,0],[L,L,0],[0,L,0],
+    [0,0,L],[L,0,L],[L,L,L],[0,L,L]
+  ].map(p => project3D(p[0], p[1], p[2], basis, halfL, scalePx, halfW));
+
+  const edges = [
+    [0,1],[1,2],[2,3],[3,0],
+    [4,5],[5,6],[6,7],[7,4],
+    [0,4],[1,5],[2,6],[3,7]
+  ];
+  ctx.lineWidth = 1;
+  for (const [a, b] of edges) {
+    const pa = corners[a], pb = corners[b];
+    if (!pa || !pb) continue;
+    const avgZ = (pa.cz + pb.cz) * 0.5;
+    const alpha = Math.max(0.10, Math.min(0.42, 0.26 - avgZ / (L * 2.5)));
+    ctx.strokeStyle = `rgba(130, 165, 230, ${alpha.toFixed(3)})`;
+    ctx.beginPath();
+    ctx.moveTo(pa.sx, pa.sy);
+    ctx.lineTo(pb.sx, pb.sy);
+    ctx.stroke();
+  }
+
+  // 2) 全粒子の3D投影
+  let visCount = 0;
+  for (let i = 0; i < N; i++) {
+    if (TY[i] < 0 && !showE) continue;
+    const p = project3D(X[i], Y[i], Z[i], basis, halfL, scalePx, halfW);
+    if (!p) continue;
+    projX[i] = p.sx;
+    projY[i] = p.sy;
+    projZ[i] = p.cz;
+    projS[i] = p.persp;
+    drawOrder[visCount++] = i;
+  }
+
+  // 3) 共有結合・近接原子間の立体ボンドガイド（二重結合の幾何学が見やすいよう半透明表示）
+  if (showB) {
+    ctx.lineWidth = 1.6;
+    for (let i = 0; i < N; i++) {
+      if (TY[i] < 0) continue;
+      for (let j = i + 1; j < N; j++) {
+        if (TY[j] < 0) continue;
+        const dx = X[j] - X[i], dy = Y[j] - Y[i], dz = Z[j] - Z[i];
+        const r = Math.hypot(dx, dy, dz);
+        const rBond = (RR[i] + RR[j]) * 1.38;
+        if (r < rBond && (DD[i] > 0 || DD[j] > 0)) {
+          const depthAlpha = Math.max(0.12, Math.min(0.45, 0.30 - ((projZ[i]+projZ[j])*0.5)/(L*2)));
+          ctx.strokeStyle = `rgba(200, 220, 255, ${depthAlpha.toFixed(3)})`;
+          ctx.beginPath();
+          ctx.moveTo(projX[i], projY[i]);
+          ctx.lineTo(projX[j], projY[j]);
+          ctx.stroke();
+        }
+      }
+    }
+  }
+
+  // 4) 奥から手前へ Z ソート（ペインターズアルゴリズム）
+  const sub = drawOrder.subarray(0, visCount);
+  sub.sort((a, b) => projZ[b] - projZ[a]);
+
+  // 5) 粒子描画（3D球体シェーディング＋電子雲グロー）
+  for (let k = 0; k < visCount; k++) {
+    const i = sub[k];
+    const sx = projX[i], sy = projY[i], cz = projZ[i], persp = projS[i];
+    const fog = Math.max(0.32, Math.min(1.0, 0.78 - cz / (L * 1.8)));
+
+    if (TY[i] < 0) {
+      // 価電子（二重結合のπ電子環や孤立電子対が立体的に光る）
+      const er = Math.max(1.4, 0.12 * persp);
+      ctx.fillStyle = `rgba(255, 222, 85, ${(0.78 * fog).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(sx, sy, er, 0, 6.283185);
+      ctx.fill();
+    } else {
+      // 原子核＋内殻球体
+      const rad = Math.max(2.6, RR[i] * persp * 0.44);
+      const baseCol = EL[NAMES[TY[i]]].c;
+
+      ctx.globalAlpha = fog;
+      ctx.fillStyle = baseCol;
+      ctx.beginPath();
+      ctx.arc(sx, sy, rad, 0, 6.283185);
+      ctx.fill();
+
+      // 3Dハイライトと輪郭の陰影
+      if (rad > 3.5) {
+        const grad = ctx.createRadialGradient(
+          sx - rad * 0.32, sy - rad * 0.32, rad * 0.08,
+          sx, sy, rad
+        );
+        grad.addColorStop(0, 'rgba(255,255,255,0.55)');
+        grad.addColorStop(0.55, 'rgba(255,255,255,0.0)');
+        grad.addColorStop(1, 'rgba(0,0,0,0.45)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(sx, sy, rad, 0, 6.283185);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1.0;
+    }
+  }
+
+  // 6) 3D干渉ツールのインジケータ
+  if (tool.on && pointerMode === 'tool') {
+    const tp = project3D(tool.x, tool.y, tool.z, basis, halfL, scalePx, halfW);
+    if (tp) {
+      const tr = (tool.mode === 'swipe' ? tool.Rs : tool.Rg) * tp.persp;
+      ctx.strokeStyle = 'rgba(110, 168, 255, 0.65)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(tp.sx, tp.sy, Math.max(6, tr), 0, 6.283185);
+      ctx.stroke();
+    }
+  }
+
+  // ステータス表示
+  let nq = 0, nAtom = 0;
+  for (let i = 0; i < N; i++) {
+    if (TY[i] < 0) nq -= 1;
+    else { nq += QQ[i]; nAtom++; }
+  }
+  st.textContent =
+    `原子 ${nAtom} / 電子 ${N - nAtom} (計 ${N})   3D箱 ${P.L.toFixed(1)}³ Å³\n` +
+    `温度 ${(Tm / KB).toFixed(0)} K   圧力 ${Pm.toFixed(3)}   総電荷 ${nq >= 0 ? '+' : ''}${nq.toFixed(0)}`;
+}
+
+/* ============================================================================
+   6. UI構築 & 3Dポインタ操作
+   ============================================================================ */
+function chips(id, list, fn, cur) {
+  const d = document.getElementById(id);
+  d.innerHTML = '';
+  list.forEach(([k, l, c]) => {
+    const b = document.createElement('button');
+    b.textContent = l;
+    if (c) {
+      b.className = 'el';
+      b.style.background = c;
+      b.style.color = /#(ffffff|ffe629|8aff00|3dff00|cfd6e0|80d1e3|1ff01f)/i.test(c) ? '#000' : '#fff';
+    }
+    b.onclick = () => {
+      fn(k);
+      [...d.children].forEach(x => x.classList.remove('on'));
+      b.classList.add('on');
+    };
+    if (k === cur) b.classList.add('on');
+    d.appendChild(b);
+  });
+}
+
+chips('els', NAMES.map(n => [n, n, EL[n].c]), k => {
+  selEl = k; selMol = null;
+  [...document.getElementById('mols').children].forEach(x => x.classList.remove('on'));
+}, 'O');
+
+chips('mols', Object.keys(MOL).map(k => [k, k]), k => {
+  selMol = k;
+  [...document.getElementById('els').children].forEach(x => x.classList.remove('on'));
+});
+
+const sl = document.getElementById('sl');
+function slider(l, id, min, max, step, get, set, fmt) {
+  const r = document.createElement('div');
+  r.className = 'row';
+  r.innerHTML = `<span>${l}</span><input id="${id}" type="range" min="${min}" max="${max}" step="${step}"><span></span>`;
+  const i = r.children[1], o = r.children[2];
+  i.value = get();
+  o.textContent = fmt ? fmt(+i.value) : i.value;
+  i.oninput = () => {
+    set(+i.value);
+    o.textContent = fmt ? fmt(+i.value) : i.value;
+  };
+  sl.appendChild(r);
+}
+
+slider('シミュ速度', 'sl_spf', 1, 30, 1, () => spf, v => spf = v);
+slider('温度 [K]', 'sl_T', 50, 1000, 10, () => Math.round(P.T / KB), v => P.T = v * KB);
+slider('電気陰性度指数 p', 'sl_cp', 0.5, 2.5, 0.05, () => P.cp, v => P.cp = v, v => v.toFixed(2));
+slider('電気力 K', 'sl_K', 4, 20, 0.5, () => P.K, v => P.K = v, v => v.toFixed(1));
+slider('オクテット力 A', 'sl_A', 10, 100, 2, () => P.A, v => P.A = v);
+slider('排他力 B', 'sl_B', 20, 220, 5, () => P.B, v => P.B = v);
+slider('コア反発 Er', 'sl_Er', 1, 15, 0.5, () => P.Er, v => P.Er = v, v => v.toFixed(1));
+slider('格子/水和 G', 'sl_G', 0, 30, 1, () => P.G, v => P.G = v);
+
+const tf = document.createElement('div');
+tf.className = 'chips';
+tf.innerHTML =
+  '<select id="filt"><option value="all">マグネット対象: 全て</option><option value="e">電子のみ</option><option value="n">原子核のみ</option>' +
+  NAMES.map(n => `<option value="${n}">${n}のみ</option>`).join('') +
+  '</select><button id="baro">定圧 OFF</button>';
+sl.appendChild(tf);
+
+document.getElementById('filt').onchange = e => tool.filt = e.target.value;
+document.getElementById('baro').onclick = function() {
+  P.baro ^= 1;
+  this.textContent = '定圧 ' + (P.baro ? 'ON' : 'OFF');
+  this.classList.toggle('on', !!P.baro);
+};
+
+// ボタンイベント
+document.getElementById('loadPreset').onclick = () => loadScenario(document.getElementById('preset').value);
+document.getElementById('preset').onchange = e => loadScenario(e.target.value);
+
+document.getElementById('add').onclick = () => {
+  const n = +document.getElementById('cnt').value;
+  if (selMol) addSpec(MOL[selMol], n);
+  else addSpec({a:[selEl], p:[[0,0,0]], b:[], ch:[+document.getElementById('chg').value]}, n);
+};
+
+document.getElementById('clear').onclick = () => { N = 0; };
+document.getElementById('play').onclick = function() {
+  run = !run;
+  this.textContent = run ? '⏸' : '▶';
+};
+document.getElementById('tgE').onclick = function() {
+  showE = !showE;
+  this.classList.toggle('on', showE);
+  this.textContent = '電子 ' + (showE ? '表示' : '非表示');
+};
+document.getElementById('tgB').onclick = function() {
+  showB = !showB;
+  this.classList.toggle('on', showB);
+  this.textContent = '結合線 ' + (showB ? '表示' : '非表示');
+};
+
+function setPointerMode(m) {
+  pointerMode = m;
+  document.getElementById('mOrbit').classList.toggle('on', m === 'orbit');
+  document.getElementById('mPut').classList.toggle('on', m === 'put');
+  document.getElementById('mTool').classList.toggle('on', m === 'tool');
+}
+document.getElementById('mOrbit').onclick = () => setPointerMode('orbit');
+document.getElementById('mPut').onclick = () => setPointerMode('put');
+document.getElementById('mTool').onclick = () => setPointerMode('tool');
+
+function putOne3D(sx, sy) {
+  if (N + 60 >= MAX) return;
+  const [wx, wy, wz] = unprojectCenterPlane(sx, sy);
+  if (selMol) place3D(MOL[selMol], wx, wy, wz);
+  else place3D({a:[selEl], p:[[0,0,0]], b:[], ch:[+document.getElementById('chg').value]}, wx, wy, wz);
+}
+
+// キャンバス上の3Dカメラ回転・ズーム・粒子配置・干渉イベント
+let dragState = null;
+let lpTimer = null;
+let lastTap = {t: 0, x: 0, y: 0};
+
+cv.addEventListener('contextmenu', e => e.preventDefault());
+
+cv.addEventListener('wheel', e => {
+  e.preventDefault();
+  cam.zoom = Math.max(0.45, Math.min(3.2, cam.zoom * (e.deltaY > 0 ? 0.92 : 1.08)));
+}, {passive: false});
+
+cv.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  cv.setPointerCapture(e.pointerId);
+  const b = cv.getBoundingClientRect();
+  const sx = (e.clientX - b.left) * (cv.width / b.width);
+  const sy = (e.clientY - b.top) * (cv.height / b.height);
+  const now = performance.now();
+
+  // 右クリックまたはカメラ回転モード時は3Dオービット回転
+  if (e.button === 2 || pointerMode === 'orbit') {
+    dragState = {type: 'orbit', sx, sy, yaw0: cam.yaw, pitch0: cam.pitch, moved: false};
+    return;
+  }
+
+  if (pointerMode === 'put') {
+    putOne3D(sx, sy);
+    return;
+  }
+
+  // 3D空間干渉ツール（スワイプ / 長押しマグネット / ダブルタップバースト）
+  const [wx, wy, wz] = unprojectCenterPlane(sx, sy);
+  tool.on = true;
+  tool.x = wx; tool.y = wy; tool.z = wz;
+  tool.vx = tool.vy = tool.vz = 0;
+  tool.mode = 'swipe';
+  dragState = {type: 'tool', sx, sy, t: now, moved: false};
+  clearTimeout(lpTimer);
+
+  if (now - lastTap.t < 320 && Math.hypot(sx - lastTap.x, sy - lastTap.y) < 25) {
+    tool.mode = 'burst';
+    tool.burst = 8;
+    lastTap.t = 0;
+    return;
+  }
+
+  lpTimer = setTimeout(() => {
+    if (dragState && !dragState.moved && tool.on) {
+      tool.mode = 'magnet';
+    }
+  }, 360);
+});
+
+cv.addEventListener('pointermove', e => {
+  if (!dragState) return;
+  const b = cv.getBoundingClientRect();
+  const sx = (e.clientX - b.left) * (cv.width / b.width);
+  const sy = (e.clientY - b.top) * (cv.height / b.height);
+
+  if (dragState.type === 'orbit') {
+    const dx = sx - dragState.sx;
+    const dy = sy - dragState.sy;
+    if (Math.hypot(dx, dy) > 4) dragState.moved = true;
+    cam.yaw = dragState.yaw0 - dx * 0.008;
+    cam.pitch = Math.max(-1.45, Math.min(1.45, dragState.pitch0 + dy * 0.008));
+  } else if (dragState.type === 'tool' && tool.on) {
+    if (Math.hypot(sx - dragState.sx, sy - dragState.sy) > 8) dragState.moved = true;
+    const [wx, wy, wz] = unprojectCenterPlane(sx, sy);
+    tool.vx = (wx - tool.x) * 0.85;
+    tool.vy = (wy - tool.y) * 0.85;
+    tool.vz = (wz - tool.z) * 0.85;
+    tool.x = wx; tool.y = wy; tool.z = wz;
+  }
+});
+
+for (const ev of ['pointerup', 'pointercancel']) {
+  cv.addEventListener(ev, () => {
+    const now = performance.now();
+    clearTimeout(lpTimer);
+    if (dragState && dragState.type === 'tool' && !dragState.moved && now - dragState.t < 300 && tool.mode === 'swipe') {
+      lastTap = {t: now, x: dragState.sx, y: dragState.sy};
+    }
+    tool.on = false;
+    dragState = null;
+  });
+}
+
+/* ============================================================================
+   7. メインループ開始
+   ============================================================================ */
+function loop() {
+  if (run) {
+    const t0 = performance.now();
+    for (let k = 0; k < spf; k++) {
+      step();
+      if (performance.now() - t0 > 16) break;
+    }
+  }
+  draw();
+  requestAnimationFrame(loop);
+}
+
+window.onload = function() {
+  loadScenario('water');
+  loop();
+};
+</script>
+</body>
+</html>
